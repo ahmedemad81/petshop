@@ -10,6 +10,13 @@ export const usersApiSlice = apiSlice.injectEndpoints({
         body: data,
       }),
     }),
+    verifyMfaUser: builder.mutation({
+      query: (data) => ({
+        url: `${USERS_URL}/auth/mfa`,
+        method: "POST",
+        body: data,
+      }),
+    }),
     logout: builder.mutation({
       query: () => ({
         url: `${USERS_URL}/logout`,
@@ -62,6 +69,7 @@ export const usersApiSlice = apiSlice.injectEndpoints({
 
 export const {
   useLoginMutation,
+  useVerifyMfaUserMutation,
   useLogoutMutation,
   useRegisterMutation,
   useGetUsersQuery,

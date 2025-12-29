@@ -29,6 +29,13 @@ const userSchema = mongoose.Schema(
       postalCode: { type: String },
       country: { type: String },
     },
+    mfa: {
+      mfaEnabled: { type: Boolean, default: true },
+      mfaOtpHash: { type: String },
+      mfaOtpExpiresAt: { type: Date },
+      mfaOtpAttempts: { type: Number, default: 0 },
+      mfaOtpLastSentAt: { type: Date },
+    }
   },
   {
     timestamps: true,

@@ -26,14 +26,14 @@ const Footer = () => {
           </Col>
           <Col xs={6} md={3} className="mb-5">
             <h5>Contact Me</h5>
-            <p>Ember Chen</p>
+            <p>Zootopia</p>
             <p>
               Portfolio Site:
               <br />
-              <a href="https://ember-chen.site">ember-chen.site</a>
+              <a href="https://zootopia.dev">zootopia.dev</a>
             </p>
             <p>
-              GitHub: <a href="https://github.com/cchen-00">cchen-00</a>
+              GitHub: <a href="https://github.com/zootopia">zootopia</a>
             </p>
           </Col>
           <Col xs={6} md={3} className="mb-5">
@@ -80,7 +80,7 @@ const Footer = () => {
           <hr />
           <p className="fw-bold mt-3">
             Designed and Developed by{" "}
-            <a href="https://ember-chen.site">Ember Chen</a>
+            <a href="https://zootopia.dev">Zootopia</a>
           </p>
           <p>Copyright © {currentYear} All rights reserved.</p>
         </Row>

@@ -2,6 +2,7 @@ import Express from "express";
 const router = Express.Router();
 import {
   authUser,
+  verifyMfaUser,
   logoutUser,
   registerUser,
   getUsers,
@@ -13,6 +14,7 @@ import {
 import { protect, admin } from "../middleware/authMiddleware.js";
 
 router.post("/auth", authUser);
+router.post("/auth/mfa", verifyMfaUser);
 router.post("/logout", logoutUser);
 router.post("/register", registerUser);
 router.get("/", protect, admin, getUsers);

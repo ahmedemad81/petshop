@@ -1,6 +1,14 @@
 import asyncHandler from "../middleware/asyncHandler.js";
 import User from "../models/userModel.js";
 import generateToken from "../utils/generateToken.js";
+import { sendMfaCodeEmail } from "../utils/mailer.js";
+import {
+  generate6DigitCode,
+  hashCode,
+  verifyCode,
+  signMfaToken,
+  verifyMfaToken,
+} from "../utils/mfa.js";
 
 // @desc    Auth user & get token
 // @route   POST /api/users/auth
@@ -10,20 +18,112 @@ const authUser = asyncHandler(async (req, res) => {
 
   const user = await User.findOne({ email });
 
-  if (user && (await user.matchPassword(password))) {
-    generateToken(res, user._id);
+  if (!user || !(await user.matchPassword(password))) {
+    res.status(401);
+    throw new Error("Invalid email or password");
+  }
 
-    res.json({
+// If MFA disabled for this user, behave like before
+  if (!user.mfa?.mfaEnabled) {
+    generateToken(res, user._id);
+    return res.json({
       _id: user._id,
       name: user.name,
       email: user.email,
       isAdmin: user.isAdmin,
       shippingAddress: user.shippingAddress,
     });
-  } else {
-    res.status(401);
-    throw new Error("Invalid email or password");
   }
+
+  // Generate and store OTP hash
+  const code = generate6DigitCode();
+  const codeHash = await hashCode(code);
+
+  user.mfa.mfaOtpHash = codeHash;
+  user.mfa.mfaOtpExpiresAt = new Date(Date.now() + process.env.MFA_OTP_TTL_MIN * 60 * 1000);
+  user.mfa.mfaOtpAttempts = 0;
+  user.mfa.mfaOtpLastSentAt = new Date();
+  await user.save();
+
+  // Send code (email)
+  await sendMfaCodeEmail({ to: user.email, code });
+
+  // Return MFA token (NOT the main auth cookie)
+  const mfaToken = signMfaToken(user._id);
+
+  res.json({ mfaRequired: true, mfaToken });
+});
+
+// POST /api/users/auth/mfa
+const verifyMfaUser = asyncHandler(async (req, res) => {
+  const { mfaToken, code } = req.body;
+
+  if (!mfaToken || !code) {
+    res.status(400);
+    throw new Error("mfaToken and code are required");
+  }
+
+  let decoded;
+  try {
+    decoded = verifyMfaToken(mfaToken);
+  } catch {
+    res.status(401);
+    throw new Error("Invalid or expired MFA token");
+  }
+
+  if (decoded.purpose !== "mfa") {
+    res.status(401);
+    throw new Error("Invalid MFA token");
+  }
+
+  const user = await User.findById(decoded.userId);
+
+  if (!user || !user.mfa?.mfaEnabled) {
+    res.status(401);
+    throw new Error("MFA not available");
+  }
+
+  if (!user.mfa.mfaOtpHash || !user.mfa.mfaOtpExpiresAt) {
+    res.status(401);
+    throw new Error("No active code. Please login again.");
+  }
+
+  if (user.mfa.mfaOtpExpiresAt.getTime() < Date.now()) {
+    res.status(401);
+    throw new Error("Code expired. Please login again.");
+  }
+
+  if (user.mfa.mfaOtpAttempts >= process.env.MFA_OTP_MAX_ATTEMPTS) {
+    res.status(429);
+    throw new Error("Too many attempts. Please login again.");
+  }
+
+  const ok = await verifyCode(code, user.mfa.mfaOtpHash);
+
+  user.mfa.mfaOtpAttempts += 1;
+
+  if (!ok) {
+    await user.save();
+    res.status(401);
+    throw new Error("Invalid code");
+  }
+
+  // Success: clear OTP fields
+  user.mfa.mfaOtpHash = undefined;
+  user.mfa.mfaOtpExpiresAt = undefined;
+  user.mfa.mfaOtpAttempts = 0;
+  await user.save();
+
+  // NOW set the normal auth cookie
+  generateToken(res, user._id);
+
+  res.json({
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    isAdmin: user.isAdmin,
+    shippingAddress: user.shippingAddress,
+  });
 });
 
 // @desc    Logout user
@@ -164,6 +264,7 @@ const getUserById = asyncHandler(async (req, res) => {
 
 export {
   authUser,
+  verifyMfaUser,
   logoutUser,
   registerUser,
   getUsers,
