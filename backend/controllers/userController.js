@@ -9,6 +9,10 @@ import {
   signMfaToken,
   verifyMfaToken,
 } from "../utils/mfa.js";
+import crypto from "crypto";
+import { OAuth2Client } from "google-auth-library";
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // @desc    Auth user & get token
 // @route   POST /api/users/auth
@@ -124,6 +128,91 @@ const verifyMfaUser = asyncHandler(async (req, res) => {
     isAdmin: user.isAdmin,
     shippingAddress: user.shippingAddress,
   });
+});
+
+// POST /api/users/auth/google
+const authGoogleUser = asyncHandler(async (req, res) => {
+  const { credential } = req.body; // GIS ID token
+
+  if (!credential) {
+    res.status(400);
+    throw new Error("credential is required");
+  }
+
+  // Verify ID token with Google
+  const ticket = await googleClient.verifyIdToken({
+    idToken: credential,
+    audience: process.env.GOOGLE_CLIENT_ID,
+  });
+
+  const payload = ticket.getPayload();
+  if (!payload) {
+    res.status(401);
+    throw new Error("Invalid Google token");
+  }
+
+  const email = payload.email;
+  const emailVerified = payload.email_verified;
+  const name = payload.name || "Google User";
+  const sub = payload.sub; // unique google id
+
+  if (!email) {
+    res.status(401);
+    throw new Error("Google account has no email");
+  }
+
+  // Find or create user by email
+  let user = await User.findOne({ email });
+
+  if (!user) {
+    // Keep password required: generate a random one (user won't use it)
+    const randomPassword = crypto.randomBytes(32).toString("hex");
+
+    user = await User.create({
+      name,
+      email,
+      password: randomPassword,
+      authProvider: "google",
+      google: { sub, emailVerified },
+      // keep your default mfa settings as you prefer
+    });
+  } else {
+    // Optional: update stored google info
+    user.authProvider = user.authProvider || "local";
+    user.google = {
+      sub: user.google?.sub || sub,
+      emailVerified,
+    };
+    await user.save();
+  }
+
+  // If MFA disabled: login normally
+  if (!user.mfa?.mfaEnabled) {
+    generateToken(res, user._id);
+    return res.json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      isAdmin: user.isAdmin,
+      shippingAddress: user.shippingAddress,
+    });
+  }
+
+  // MFA enabled: same behavior as password login
+  const code = generate6DigitCode();
+  const codeHash = await hashCode(code);
+
+  user.mfa.mfaOtpHash = codeHash;
+  const ttlMin = Number(process.env.MFA_OTP_TTL_MIN || 10);
+  user.mfa.mfaOtpExpiresAt = new Date(Date.now() + ttlMin * 60 * 1000);
+  user.mfa.mfaOtpAttempts = 0;
+  user.mfa.mfaOtpLastSentAt = new Date();
+  await user.save();
+
+  await sendMfaCodeEmail({ to: user.email, code });
+
+  const mfaToken = signMfaToken(user._id);
+  res.json({ mfaRequired: true, mfaToken });
 });
 
 // @desc    Logout user
@@ -265,6 +354,7 @@ const getUserById = asyncHandler(async (req, res) => {
 export {
   authUser,
   verifyMfaUser,
+  authGoogleUser,
   logoutUser,
   registerUser,
   getUsers,

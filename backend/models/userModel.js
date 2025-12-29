@@ -16,6 +16,11 @@ const userSchema = mongoose.Schema(
       type: String,
       required: true,
     },
+    google: {
+        sub: { type: String },
+        emailVerified: { type: Boolean }
+    },
+    authProvider: { type: String, default: "local" },
     isAdmin: {
       type: Boolean,
       required: true,

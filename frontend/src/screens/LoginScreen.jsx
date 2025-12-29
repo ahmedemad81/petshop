@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import PageTitle from "../components/PageTitle";
 import { Container, Form, Button, Row, Col, Card } from "react-bootstrap";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -6,7 +6,11 @@ import Loader from "../components/Loader";
 import signInImg from "../assets/sign-in.png";
 import { useDispatch, useSelector } from "react-redux";
 import { setCredentials } from "../slices/authSlice";
-import { useLoginMutation, useVerifyMfaUserMutation } from "../slices/usersApiSlice";
+import {
+  useLoginMutation,
+  useVerifyMfaUserMutation,
+  useAuthGoogleMutation,
+} from "../slices/usersApiSlice";
 import { toast } from "react-toastify";
 
 const LoginScreen = () => {
@@ -17,27 +21,82 @@ const LoginScreen = () => {
   const [mfaCode, setMfaCode] = useState("");
   const [mfaToken, setMfaToken] = useState("");
 
-  const navigator = useNavigate();
+  const navigate = useNavigate();
   const dispatch = useDispatch();
 
   const [login, { isLoading: isLoggingIn }] = useLoginMutation();
   const [verifyMfaUser, { isLoading: isVerifying }] = useVerifyMfaUserMutation();
+  const [authGoogle, { isLoading: isGoogleLoading }] = useAuthGoogleMutation();
 
   const { userInfo } = useSelector((state) => state.auth);
 
   const { search } = useLocation();
   const redirect = search ? new URLSearchParams(search).get("redirect") : "/";
 
+  const googleBtnRef = useRef(null);
+  const googleInitRef = useRef(false);
+
   useEffect(() => {
-    if (userInfo) navigator(redirect);
-  }, [navigator, redirect, userInfo]);
+    if (userInfo) navigate(redirect);
+  }, [userInfo, navigate, redirect]);
+
+  useEffect(() => {
+    if (step !== "password") return;
+
+    const clientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
+    if (!clientId) return; // make sure you set REACT_APP_GOOGLE_CLIENT_ID
+
+    // Wait until the script is available
+    if (!window.google?.accounts?.id) return;
+    if (!googleBtnRef.current) return;
+
+    if (!googleInitRef.current) {
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: async (response) => {
+          try {
+            if (!response?.credential) {
+              toast.error("Google login failed");
+              return;
+            }
+
+            const res = await authGoogle({ credential: response.credential }).unwrap();
+
+            if (res?.mfaRequired) {
+              setMfaToken(res.mfaToken);
+              setStep("mfa");
+              toast.info("We sent a 6-digit code to your email.");
+              return;
+            }
+
+            dispatch(setCredentials({ ...res }));
+            navigate(redirect);
+          } catch (error) {
+            toast.error(error?.data?.message || error?.error || "Google login failed");
+          }
+        },
+      });
+
+      googleInitRef.current = true;
+    }
+
+    // Avoid duplicated buttons
+    googleBtnRef.current.innerHTML = "";
+
+    window.google.accounts.id.renderButton(googleBtnRef.current, {
+      theme: "outline",
+      text: "signin_with",
+      shape: "pill",
+      size: "large",
+      width: 320,
+    });
+  }, [step, authGoogle, dispatch, navigate, redirect]);
 
   const submitPassword = async (e) => {
     e.preventDefault();
     try {
       const res = await login({ email, password }).unwrap();
 
-      // MFA path
       if (res?.mfaRequired) {
         setMfaToken(res.mfaToken);
         setStep("mfa");
@@ -45,9 +104,8 @@ const LoginScreen = () => {
         return;
       }
 
-      // Normal path
       dispatch(setCredentials({ ...res }));
-      navigator(redirect);
+      navigate(redirect);
     } catch (error) {
       toast.error(error?.data?.message || error?.error || "Unknown Error");
     }
@@ -58,13 +116,13 @@ const LoginScreen = () => {
     try {
       const res = await verifyMfaUser({ mfaToken, code: mfaCode }).unwrap();
       dispatch(setCredentials({ ...res }));
-      navigator(redirect);
+      navigate(redirect);
     } catch (error) {
       toast.error(error?.data?.message || error?.error || "Invalid code");
     }
   };
 
-  const loading = isLoggingIn || isVerifying;
+  const loading = isLoggingIn || isVerifying || isGoogleLoading;
 
   return (
     <Container>
@@ -106,6 +164,10 @@ const LoginScreen = () => {
                   {loading && <Loader />}
                   <span className="ms-2">Sign In</span>
                 </Button>
+
+                <div className="mt-3 d-flex justify-content-center">
+                  <div ref={googleBtnRef} />
+                </div>
 
                 <Row className="py-3">
                   <Col>

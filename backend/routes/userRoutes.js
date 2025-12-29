@@ -1,4 +1,5 @@
 import Express from "express";
+import { authGoogleUser } from "../controllers/userController.js";
 const router = Express.Router();
 import {
   authUser,
@@ -15,6 +16,7 @@ import { protect, admin } from "../middleware/authMiddleware.js";
 
 router.post("/auth", authUser);
 router.post("/auth/mfa", verifyMfaUser);
+router.post("/auth/google", authGoogleUser);
 router.post("/logout", logoutUser);
 router.post("/register", registerUser);
 router.get("/", protect, admin, getUsers);
